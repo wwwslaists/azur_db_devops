@@ -6,11 +6,11 @@ USE TestDB;
 GO
 
 -- 1. Izveidot log tabulu
-IF OBJECT_ID('dbo.SchemaChangeLog', 'U') IS NOT NULL
-    DROP TABLE dbo.SchemaChangeLog;
+IF OBJECT_ID('dbo.devops_SchemaChangeLog', 'U') IS NOT NULL
+    DROP TABLE dbo.devops_SchemaChangeLog;
 GO
 
-CREATE TABLE dbo.SchemaChangeLog (
+CREATE TABLE dbo.devops_SchemaChangeLog (
     ChangeId INT IDENTITY(1,1) PRIMARY KEY,
     ObjectName NVARCHAR(256),
     SchemaName NVARCHAR(128),
@@ -28,7 +28,7 @@ CREATE TABLE dbo.SchemaChangeLog (
 GO
 
 -- 2. Stored procedure lai iegūtu neapstrādātās izmaiņas
-CREATE OR ALTER PROCEDURE dbo.usp_GetUnprocessedSchemaChanges
+CREATE OR ALTER PROCEDURE dbo.usp_devops_GetUnprocessedSchemaChanges
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -42,14 +42,14 @@ BEGIN
         ChangedBy,
         ChangedAt,
         SQLCommand
-    FROM dbo.SchemaChangeLog
+    FROM dbo.devops_SchemaChangeLog
     WHERE Processed = 0
     ORDER BY ChangedAt ASC;
 END;
 GO
 
 -- 3. Stored procedure lai atzīmētu kā apstrādātas
-CREATE OR ALTER PROCEDURE dbo.usp_MarkSchemaChangesProcessed
+CREATE OR ALTER PROCEDURE dbo.usp_devops_MarkSchemaChangesProcessed
     @ChangeIds NVARCHAR(MAX),  -- Comma-separated IDs
     @PipelineRunId NVARCHAR(100)
 AS
@@ -69,7 +69,7 @@ BEGIN
         Processed = 1,
         ProcessedAt = SYSDATETIME(),
         PipelineRunId = @PipelineRunId
-    FROM dbo.SchemaChangeLog scl
+    FROM dbo.devops_SchemaChangeLog scl
     INNER JOIN #ChangeIds ci ON scl.ChangeId = ci.ChangeId;
     
     -- Return updated count
@@ -80,7 +80,7 @@ END;
 GO
 
 -- 4. View lai skatītu statistiku
-CREATE OR ALTER VIEW dbo.vw_SchemaChangeStats
+CREATE OR ALTER VIEW dbo.vw_devops_SchemaChangeStats
 AS
 SELECT 
     CAST(ChangedAt AS DATE) AS ChangeDate,
@@ -94,13 +94,13 @@ GROUP BY CAST(ChangedAt AS DATE), ChangeType, ObjectType;
 GO
 
 -- 5. Cleanup procedure (dzēst vecākus par 30 dienām)
-CREATE OR ALTER PROCEDURE dbo.usp_CleanupSchemaChangeLog
+CREATE OR ALTER PROCEDURE dbo.usp_devops_CleanupSchemaChangeLog
     @RetentionDays INT = 30
 AS
 BEGIN
     SET NOCOUNT ON;
     
-    DELETE FROM dbo.SchemaChangeLog
+    DELETE FROM dbo.devops_SchemaChangeLog
     WHERE 
         Processed = 1
         AND ProcessedAt < DATEADD(DAY, -@RetentionDays, SYSDATETIME());

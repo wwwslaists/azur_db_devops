@@ -6,11 +6,11 @@ USE TestDB;
 GO
 
 -- Drop ja eksistē
-IF EXISTS (SELECT * FROM sys.triggers WHERE parent_class = 0 AND name = 'trg_CaptureSchemaChanges')
-    DROP TRIGGER trg_CaptureSchemaChanges ON DATABASE;
+IF EXISTS (SELECT * FROM sys.triggers WHERE parent_class = 0 AND name = 'trg_devops_CaptureSchemaChanges')
+    DROP TRIGGER trg_devops_CaptureSchemaChanges ON DATABASE;
 GO
 
-CREATE TRIGGER trg_CaptureSchemaChanges
+CREATE TRIGGER trg_devops_CaptureSchemaChanges
 ON DATABASE
 FOR 
     -- Tables
@@ -48,8 +48,8 @@ BEGIN
         @LoginName = @EventData.value('(/EVENT_INSTANCE/LoginName)[1]', 'NVARCHAR(128)'),
         @SQLCommand = @EventData.value('(/EVENT_INSTANCE/TSQLCommand/CommandText)[1]', 'NVARCHAR(MAX)');
     
-    -- Ignorēt izmaiņas SchemaChangeLog tabulā (avoid recursion)
-    IF @ObjectName = 'SchemaChangeLog' AND @SchemaName = 'dbo'
+    -- Ignorēt izmaiņas devops_SchemaChangeLog tabulā (avoid recursion)
+    IF @ObjectName = 'devops_SchemaChangeLog' AND @SchemaName = 'dbo'
         RETURN;
     
     -- Ignorēt service accounts (optional)
@@ -58,7 +58,7 @@ BEGIN
     
     -- Ielogot izmaiņas
     BEGIN TRY
-        INSERT INTO dbo.SchemaChangeLog (
+        INSERT INTO dbo.devops_SchemaChangeLog (
             ObjectName,
             SchemaName,
             ObjectType,
@@ -83,7 +83,7 @@ END;
 GO
 
 -- Aktivizēt trigger
-ENABLE TRIGGER trg_CaptureSchemaChanges ON DATABASE;
+ENABLE TRIGGER trg_devops_CaptureSchemaChanges ON DATABASE;
 GO
 
 PRINT 'DDL Trigger izveidots un aktivizēts';

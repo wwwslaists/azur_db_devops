@@ -22,10 +22,10 @@ END;
 GO
 
 -- Pārbaudīt log
-SELECT * FROM dbo.SchemaChangeLog ORDER BY ChangedAt DESC;
+SELECT * FROM dbo.devops_SchemaChangeLog ORDER BY ChangedAt DESC;
 
 -- Skatīt statistiku
-SELECT * FROM dbo.vw_SchemaChangeStats;
+SELECT * FROM dbo.vw_devops_SchemaChangeStats;
 
 -- Cleanup test objekti
 DROP PROCEDURE IF EXISTS dbo.usp_TestProc;
