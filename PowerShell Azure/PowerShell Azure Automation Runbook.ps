@@ -1,0 +1,146 @@
+<#
+.SYNOPSIS
+    Pārbauda SQL schema izmaiņas un aktivizē pipeline
+    
+.DESCRIPTION
+    Runbook kas darbojas uz schedule un pārbauda vai ir
+    neapstrādātas schema izmaiņas Test DB
+#>
+
+param(
+    [Parameter(Mandatory=$false)]
+    [string]$ResourceGroupName = "myRG",
+    
+    [Parameter(Mandatory=$false)]
+    [string]$AutomationAccountName = "myAutomation"
+)
+
+# Import modules
+Import-Module Az.Sql
+Import-Module Az.Accounts
+
+# Logging function
+function Write-Log {
+    param([string]$Message, [string]$Level = "INFO")
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    Write-Output "[$timestamp] [$Level] $Message"
+}
+
+try {
+    # 1. Authenticate ar Managed Identity
+    Write-Log "Authenticating with Managed Identity..."
+    Connect-AzAccount -Identity | Out-Null
+    
+    # 2. Get credentials no Automation Variables
+    $sqlServer = Get-AutomationVariable -Name 'TestSqlServer'
+    $sqlDatabase = Get-AutomationVariable -Name 'TestSqlDatabase'
+    $sqlUser = Get-AutomationVariable -Name 'TestSqlUser'
+    $sqlPasswordSecure = Get-AutomationVariable -Name 'TestSqlPassword'
+    
+    $adoOrg = Get-AutomationVariable -Name 'AdoOrganization'
+    $adoProject = Get-AutomationVariable -Name 'AdoProject'
+    $adoPipelineId = Get-AutomationVariable -Name 'AdoPipelineId'
+    $adoPat = Get-AutomationVariable -Name 'AdoPAT'
+    
+    # 3. Izveidot SQL connection
+    Write-Log "Connecting to SQL Server: $sqlServer"
+    
+    $connectionString = "Server=tcp:$sqlServer,1433;Database=$sqlDatabase;User ID=$sqlUser;Password=$sqlPasswordSecure;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;"
+    
+    $connection = New-Object System.Data.SqlClient.SqlConnection
+    $connection.ConnectionString = $connectionString
+    $connection.Open()
+    
+    # 4. Execute stored procedure
+    Write-Log "Checking for unprocessed schema changes..."
+    
+    $command = New-Object System.Data.SqlClient.SqlCommand
+    $command.Connection = $connection
+    $command.CommandText = "EXEC dbo.usp_GetUnprocessedSchemaChanges"
+    $command.CommandType = [System.Data.CommandType]::Text
+    
+    $adapter = New-Object System.Data.SqlClient.SqlDataAdapter $command
+    $dataset = New-Object System.Data.DataSet
+    $adapter.Fill($dataset) | Out-Null
+    
+    $changes = $dataset.Tables[0]
+    
+    if ($changes.Rows.Count -eq 0) {
+        Write-Log "No unprocessed schema changes found"
+        $connection.Close()
+        return
+    }
+    
+    Write-Log "Found $($changes.Rows.Count) unprocessed schema changes"
+    
+    # 5. Sagatavojam change summary
+    $changeSummary = @()
+    $changeIds = @()
+    
+    foreach ($row in $changes.Rows) {
+        $changeIds += $row.ChangeId
+        $changeSummary += @{
+            object = "$($row.SchemaName).$($row.ObjectName)"
+            type = $row.ObjectType
+            action = $row.ChangeType
+            changedBy = $row.ChangedBy
+            timestamp = $row.ChangedAt.ToString("o")
+        }
+    }
+    
+    # 6. Trigger Azure DevOps Pipeline
+    Write-Log "Triggering Azure DevOps Pipeline..."
+    
+    $url = "https://dev.azure.com/$adoOrg/$adoProject/_apis/pipelines/$adoPipelineId/runs?api-version=7.0"
+    
+    $body = @{
+        resources = @{
+            repositories = @{
+                self = @{
+                    refName = "refs/heads/main"
+                }
+            }
+        }
+        templateParameters = @{
+            triggerReason = "schema_change_detected"
+            changeCount = $changes.Rows.Count.ToString()
+            changes = ($changeSummary | ConvertTo-Json -Compress)
+        }
+    } | ConvertTo-Json -Depth 10
+    
+    # Create auth header
+    $base64AuthInfo = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(":$adoPat"))
+    $headers = @{
+        Authorization = "Basic $base64AuthInfo"
+        "Content-Type" = "application/json"
+    }
+    
+    $response = Invoke-RestMethod -Uri $url -Method Post -Body $body -Headers $headers
+    $runId = $response.id
+    
+    Write-Log "Pipeline triggered successfully. Run ID: $runId"
+    
+    # 7. Mark changes as processed
+    Write-Log "Marking changes as processed..."
+    
+    $changeIdsString = $changeIds -join ','
+    
+    $updateCommand = New-Object System.Data.SqlClient.SqlCommand
+    $updateCommand.Connection = $connection
+    $updateCommand.CommandText = "EXEC dbo.usp_MarkSchemaChangesProcessed @ChangeIds, @PipelineRunId"
+    $updateCommand.Parameters.AddWithValue("@ChangeIds", $changeIdsString) | Out-Null
+    $updateCommand.Parameters.AddWithValue("@PipelineRunId", $runId) | Out-Null
+    
+    $updateResult = $updateCommand.ExecuteScalar()
+    Write-Log "Marked $updateResult changes as processed"
+    
+    # 8. Close connection
+    $connection.Close()
+    
+    Write-Log "Schema change poller completed successfully"
+    
+} catch {
+    Write-Log "ERROR: $($_.Exception.Message)" -Level "ERROR"
+    Write-Log "Stack Trace: $($_.Exception.StackTrace)" -Level "ERROR"
+    throw
+}
