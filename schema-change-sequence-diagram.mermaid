@@ -1,0 +1,123 @@
+sequenceDiagram
+    participant DEV as 👨‍💻 Developer
+    participant SQL as 🗄️ Test SQL Database
+    participant TRG as ⚡ DDL Trigger
+    participant LOG as 📋 SchemaChangeLog
+    participant TMR as ⏰ Timer
+    participant FNC as 🔍 Azure Function/Automation
+    participant ADO as 🌐 Azure DevOps API
+    participant PIP as 🚀 Pipeline
+    participant DACPAC as 📦 DACPAC Deployment
+    participant MON as 📊 Monitoring
+
+    Note over DEV,SQL: 1. Schema izmaiņas Test DB
+    DEV->>SQL: ALTER TABLE Users ADD Email NVARCHAR(255)
+    activate SQL
+    SQL->>TRG: DDL Event aktivizē trigger
+    activate TRG
+    
+    Note over TRG: Izveidot EVENTDATA() XML
+    TRG->>TRG: Parse XML<br/>- ObjectName: Users<br/>- ChangeType: ALTER_TABLE<br/>- LoginName: developer@company.com
+    
+    TRG->>LOG: INSERT INTO SchemaChangeLog
+    activate LOG
+    LOG-->>TRG: ✓ Logged (ChangeId=123)
+    deactivate TRG
+    SQL-->>DEV: ✓ ALTER TABLE completed
+    deactivate SQL
+    
+    Note over LOG: Processed=0<br/>Gaida polling
+
+    rect rgb(255, 250, 205)
+        Note over TMR,FNC: 2. Polling Cycle (katras 2-5 min)
+        TMR->>FNC: ⏰ Timer trigger fires
+        activate FNC
+        
+        FNC->>LOG: EXEC usp_GetUnprocessedSchemaChanges
+        activate LOG
+        LOG-->>FNC: Return 1 row<br/>(ChangeId=123, ObjectName=Users...)
+        deactivate LOG
+        
+        alt Ir neapstrādātas izmaiņas
+            Note over FNC: Parse un prepare payload
+            FNC->>FNC: Create JSON:<br/>{object: "dbo.Users",<br/>action: "ALTER_TABLE"...}
+        else Nav izmaiņu
+            FNC-->>TMR: ✓ No changes, exit
+        end
+    end
+
+    rect rgb(230, 245, 255)
+        Note over FNC,PIP: 3. Pipeline Trigger
+        FNC->>ADO: POST /pipelines/123/runs<br/>+ templateParameters
+        activate ADO
+        ADO->>ADO: Validate request<br/>Check permissions
+        ADO->>PIP: Queue pipeline
+        activate PIP
+        ADO-->>FNC: ✓ 200 OK<br/>{id: "run-456"}
+        deactivate ADO
+        
+        FNC->>MON: Log: Pipeline triggered (run-456)
+        activate MON
+        MON-->>FNC: ✓ Logged
+        deactivate MON
+    end
+
+    rect rgb(255, 240, 245)
+        Note over PIP,DACPAC: 4. Pipeline Execution
+        
+        PIP->>PIP: Stage 1: Validate<br/>Display schema changes
+        PIP->>MON: Log validation
+        
+        PIP->>PIP: Stage 2: Build<br/>MSBuild *.sqlproj
+        Note over PIP: Generate database.dacpac
+        
+        PIP->>DACPAC: Stage 3: Deploy<br/>SqlAzureDacpacDeployment
+        activate DACPAC
+        DACPAC->>SQL: Connect to Test DB
+        activate SQL
+        DACPAC->>SQL: Compare DACPAC vs Current Schema
+        SQL-->>DACPAC: Schema differences
+        DACPAC->>SQL: Apply changes (ALTER statements)
+        SQL-->>DACPAC: ✓ Changes applied
+        deactivate SQL
+        DACPAC-->>PIP: ✓ Deployment successful
+        deactivate DACPAC
+        
+        PIP->>PIP: Stage 4: Verify<br/>Post-deploy checks
+        PIP->>MON: Log deployment success
+    end
+
+    rect rgb(232, 245, 233)
+        Note over FNC,LOG: 5. Mark as Processed
+        FNC->>LOG: EXEC usp_MarkSchemaChangesProcessed<br/>@ChangeIds='123'<br/>@PipelineRunId='run-456'
+        activate LOG
+        LOG->>LOG: UPDATE SchemaChangeLog<br/>SET Processed=1,<br/>PipelineRunId='run-456'
+        LOG-->>FNC: ✓ 1 row updated
+        deactivate LOG
+        
+        FNC->>MON: Log: Marked as processed
+        FNC-->>TMR: ✓ Cycle complete
+        deactivate FNC
+    end
+
+    rect rgb(255, 235, 238)
+        Note over TMR,MON: Error Scenario Example
+        TMR->>FNC: ⏰ Next timer trigger
+        activate FNC
+        FNC->>ADO: POST /pipelines/123/runs
+        activate ADO
+        ADO-->>FNC: ❌ 401 Unauthorized<br/>(PAT expired)
+        deactivate ADO
+        
+        FNC->>MON: Log ERROR: Pipeline trigger failed
+        activate MON
+        MON->>MON: Check error threshold
+        MON-->>FNC: ⚠️ Trigger alert
+        deactivate MON
+        
+        Note over FNC: Changes remain Processed=0<br/>Will retry on next cycle
+        FNC-->>TMR: Exit with error
+        deactivate FNC
+    end
+
+    Note over DEV,MON: Process turpinās ar nākamo Timer cycle...

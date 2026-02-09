@@ -1,0 +1,88 @@
+graph TB
+    subgraph INPUT["📥 INPUT - Schema Changes"]
+        DDL["DDL Statement<br/>════════════<br/>ALTER TABLE Users<br/>ADD Email NVARCHAR(255)"]
+    end
+    
+    subgraph CAPTURE["📝 CAPTURE - DDL Trigger"]
+        XML["EVENTDATA XML<br/>════════════<br/>&lt;EVENT_INSTANCE&gt;<br/>&nbsp;&nbsp;&lt;EventType&gt;ALTER_TABLE&lt;/EventType&gt;<br/>&nbsp;&nbsp;&lt;ObjectName&gt;Users&lt;/ObjectName&gt;<br/>&nbsp;&nbsp;&lt;SchemaName&gt;dbo&lt;/SchemaName&gt;<br/>&nbsp;&nbsp;&lt;ObjectType&gt;TABLE&lt;/ObjectType&gt;<br/>&nbsp;&nbsp;&lt;LoginName&gt;dev@co.com&lt;/LoginName&gt;<br/>&nbsp;&nbsp;&lt;TSQLCommand&gt;<br/>&nbsp;&nbsp;&nbsp;&nbsp;&lt;CommandText&gt;ALTER...&lt;/CommandText&gt;<br/>&nbsp;&nbsp;&lt;/TSQLCommand&gt;<br/>&lt;/EVENT_INSTANCE&gt;"]
+    end
+    
+    subgraph STORAGE["💾 STORAGE - Database Table"]
+        TABLE["SchemaChangeLog Record<br/>════════════════════<br/>ChangeId: 123<br/>ObjectName: 'Users'<br/>SchemaName: 'dbo'<br/>ObjectType: 'TABLE'<br/>ChangeType: 'ALTER_TABLE'<br/>ChangedBy: 'dev@co.com'<br/>ChangedAt: 2026-02-09 14:30:00<br/>SQLCommand: 'ALTER TABLE...'<br/>Processed: 0<br/>ProcessedAt: NULL<br/>PipelineRunId: NULL"]
+    end
+    
+    subgraph QUERY["🔍 QUERY - Polling"]
+        SP_OUT["Stored Proc Output<br/>═══════════════<br/>SELECT Result Set:<br/>┌─────────┬──────────┬─────────┐<br/>│ChangeId │ObjectName│ChangeTyp│<br/>├─────────┼──────────┼─────────┤<br/>│ 123     │ Users    │ ALTER_  │<br/>│         │          │ TABLE   │<br/>└─────────┴──────────┴─────────┘<br/><br/>WHERE Processed = 0"]
+    end
+    
+    subgraph TRANSFORM["🔄 TRANSFORM - Function"]
+        JSON["JSON Payload<br/>═══════════<br/>{<br/>&nbsp;&nbsp;'changes': [<br/>&nbsp;&nbsp;&nbsp;&nbsp;{<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;'object': 'dbo.Users',<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;'type': 'TABLE',<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;'action': 'ALTER_TABLE',<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;'changedBy': 'dev@co.com',<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;'timestamp': '2026-02-09T14:30:00'<br/>&nbsp;&nbsp;&nbsp;&nbsp;}<br/>&nbsp;&nbsp;],<br/>&nbsp;&nbsp;'changeCount': 1<br/>}"]
+    end
+    
+    subgraph API_REQ["🌐 API REQUEST"]
+        HTTP["HTTP POST Request<br/>════════════════<br/>URL: https://dev.azure.com/<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;org/project/_apis/<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;pipelines/123/runs<br/><br/>Headers:<br/>&nbsp;&nbsp;Authorization: Basic ***<br/>&nbsp;&nbsp;Content-Type: application/json<br/><br/>Body:<br/>{<br/>&nbsp;&nbsp;'resources': {<br/>&nbsp;&nbsp;&nbsp;&nbsp;'repositories': {<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;'self': {<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;'refName': 'refs/heads/main'<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>&nbsp;&nbsp;&nbsp;&nbsp;}<br/>&nbsp;&nbsp;},<br/>&nbsp;&nbsp;'templateParameters': {<br/>&nbsp;&nbsp;&nbsp;&nbsp;'triggerReason': 'schema_change',<br/>&nbsp;&nbsp;&nbsp;&nbsp;'changeCount': '1',<br/>&nbsp;&nbsp;&nbsp;&nbsp;'changes': '[...]'<br/>&nbsp;&nbsp;}<br/>}"]
+    end
+    
+    subgraph API_RESP["📤 API RESPONSE"]
+        RESP["HTTP 200 OK<br/>═══════════<br/>{<br/>&nbsp;&nbsp;'id': 'run-456',<br/>&nbsp;&nbsp;'name': 'Deploy-20260209.1',<br/>&nbsp;&nbsp;'state': 'inProgress',<br/>&nbsp;&nbsp;'createdDate': '2026-02-09T14:31:00',<br/>&nbsp;&nbsp;'url': 'https://dev.azure.com/...',<br/>&nbsp;&nbsp;'_links': {...}<br/>}"]
+    end
+    
+    subgraph PIPELINE_VARS["🎯 PIPELINE VARIABLES"]
+        VARS["Pipeline Variables<br/>═════════════════<br/>$(triggerReason) = 'schema_change'<br/>$(changeCount) = '1'<br/>$(changes) = '[{...}]'<br/><br/>Used in pipeline stages:<br/>- Validation<br/>- Logging<br/>- Notifications"]
+    end
+    
+    subgraph UPDATE_REQ["💾 UPDATE REQUEST"]
+        UPDATE["UPDATE Statement<br/>═══════════════<br/>EXEC usp_MarkSchemaChangesProcessed<br/>&nbsp;&nbsp;@ChangeIds = '123',<br/>&nbsp;&nbsp;@PipelineRunId = 'run-456'<br/><br/>Translates to:<br/>UPDATE SchemaChangeLog<br/>SET<br/>&nbsp;&nbsp;Processed = 1,<br/>&nbsp;&nbsp;ProcessedAt = SYSDATETIME(),<br/>&nbsp;&nbsp;PipelineRunId = 'run-456'<br/>WHERE ChangeId IN (123)"]
+    end
+    
+    subgraph FINAL_STATE["✅ FINAL STATE"]
+        UPDATED["Updated Record<br/>═════════════<br/>ChangeId: 123<br/>ObjectName: 'Users'<br/>SchemaName: 'dbo'<br/>ObjectType: 'TABLE'<br/>ChangeType: 'ALTER_TABLE'<br/>ChangedBy: 'dev@co.com'<br/>ChangedAt: 2026-02-09 14:30:00<br/>SQLCommand: 'ALTER TABLE...'<br/>✓ Processed: 1<br/>✓ ProcessedAt: 2026-02-09 14:31:30<br/>✓ PipelineRunId: 'run-456'"]
+    end
+    
+    DDL -->|"1. Execute"| XML
+    XML -->|"2. Parse & Extract"| TABLE
+    TABLE -->|"3. SELECT query<br/>(every 2-5 min)"| SP_OUT
+    SP_OUT -->|"4. Transform to JSON"| JSON
+    JSON -->|"5. Build HTTP body"| HTTP
+    HTTP -->|"6. POST to Azure DevOps"| RESP
+    RESP -->|"7. Extract run ID"| VARS
+    VARS -->|"8. Trigger pipeline with params"| UPDATE_REQ
+    UPDATE_REQ -->|"9. Execute UPDATE"| UPDATED
+    
+    subgraph MONITORING_DATA["📊 MONITORING DATA FLOW"]
+        LOG1["Log Entry 1<br/>═══════════<br/>Timestamp: 14:31:00<br/>Level: INFO<br/>Message: 'Found 1 unprocessed<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;schema changes'<br/>ChangeIds: [123]"]
+        
+        LOG2["Log Entry 2<br/>═══════════<br/>Timestamp: 14:31:15<br/>Level: INFO<br/>Message: 'Pipeline triggered<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;successfully'<br/>RunId: 'run-456'"]
+        
+        LOG3["Log Entry 3<br/>═══════════<br/>Timestamp: 14:31:30<br/>Level: INFO<br/>Message: 'Marked 1 changes<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;as processed'<br/>RunId: 'run-456'"]
+    end
+    
+    SP_OUT -.->|"Log"| LOG1
+    RESP -.->|"Log"| LOG2
+    UPDATE_REQ -.->|"Log"| LOG3
+    
+    style INPUT fill:#E8F5E9,stroke:#2E7D32,stroke-width:2px
+    style CAPTURE fill:#FFF3E0,stroke:#E65100,stroke-width:2px
+    style STORAGE fill:#E3F2FD,stroke:#1565C0,stroke-width:2px
+    style QUERY fill:#F3E5F5,stroke:#6A1B9A,stroke-width:2px
+    style TRANSFORM fill:#FFF9C4,stroke:#F57F17,stroke-width:2px
+    style API_REQ fill:#E0F2F1,stroke:#00695C,stroke-width:2px
+    style API_RESP fill:#FCE4EC,stroke:#C2185B,stroke-width:2px
+    style PIPELINE_VARS fill:#EFEBE9,stroke:#4E342E,stroke-width:2px
+    style UPDATE_REQ fill:#E8EAF6,stroke:#3949AB,stroke-width:2px
+    style FINAL_STATE fill:#C8E6C9,stroke:#2E7D32,stroke-width:3px
+    style MONITORING_DATA fill:#FFF3E0,stroke:#FF6F00,stroke-width:2px
+    
+    style DDL fill:#fff,stroke:#333,stroke-width:1px
+    style XML fill:#fff,stroke:#333,stroke-width:1px
+    style TABLE fill:#fff,stroke:#333,stroke-width:1px
+    style SP_OUT fill:#fff,stroke:#333,stroke-width:1px
+    style JSON fill:#fff,stroke:#333,stroke-width:1px
+    style HTTP fill:#fff,stroke:#333,stroke-width:1px
+    style RESP fill:#fff,stroke:#333,stroke-width:1px
+    style VARS fill:#fff,stroke:#333,stroke-width:1px
+    style UPDATE fill:#fff,stroke:#333,stroke-width:1px
+    style UPDATED fill:#fff,stroke:#333,stroke-width:1px
+    style LOG1 fill:#fff,stroke:#333,stroke-width:1px
+    style LOG2 fill:#fff,stroke:#333,stroke-width:1px
+    style LOG3 fill:#fff,stroke:#333,stroke-width:1px

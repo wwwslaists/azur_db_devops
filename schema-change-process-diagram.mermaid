@@ -1,0 +1,109 @@
+graph TB
+    subgraph "1. Test Database - Schema Izmaiņas"
+        DEV[👨‍💻 Developer/DBA]
+        CHANGE[🔧 Schema Change<br/>CREATE/ALTER/DROP<br/>Table, Procedure, View]
+        DEV -->|Veic izmaiņas| CHANGE
+    end
+
+    subgraph "2. Azure SQL - Change Capture"
+        TRIGGER[⚡ DDL Trigger<br/>trg_CaptureSchemaChanges]
+        LOG[(📋 SchemaChangeLog<br/>Tabula)]
+        EVENTDATA[📄 EVENTDATA XML<br/>ObjectName<br/>ChangeType<br/>SQLCommand]
+        
+        CHANGE -->|Aktivizē| TRIGGER
+        TRIGGER -->|Izvelk datus| EVENTDATA
+        EVENTDATA -->|INSERT| LOG
+    end
+
+    subgraph "3. Polling Mechanism - Azure Function / Automation"
+        TIMER[⏰ Timer Trigger<br/>Katras 2-5 min]
+        POLL[🔍 Poll Check<br/>usp_GetUnprocessedSchemaChanges]
+        CHECK{Ir neapstrādātas<br/>izmaiņas?}
+        
+        TIMER -->|Aktivizē| POLL
+        LOG -.->|Query| POLL
+        POLL --> CHECK
+    end
+
+    subgraph "4. Change Processing"
+        PARSE[📊 Parse Changes<br/>Izveidot summary]
+        VALIDATE[✅ Validate<br/>Check risky changes]
+        PREP[📦 Prepare Payload<br/>JSON with change details]
+        
+        CHECK -->|Jā| PARSE
+        PARSE --> VALIDATE
+        VALIDATE --> PREP
+    end
+
+    subgraph "5. Azure DevOps - Pipeline Trigger"
+        API[🌐 REST API Call<br/>POST /pipelines/{id}/runs]
+        QUEUE[📥 Pipeline Queue]
+        START[▶️ Pipeline Start]
+        
+        PREP -->|HTTP POST| API
+        API --> QUEUE
+        QUEUE --> START
+    end
+
+    subgraph "6. Pipeline Execution Stages"
+        STAGE1[📋 Stage: Validate<br/>Display changes<br/>Check for risks]
+        STAGE2[🔨 Stage: Build<br/>Build DACPAC<br/>from source]
+        STAGE3[🚀 Stage: Deploy<br/>SqlAzureDacpacDeployment<br/>to Test DB]
+        STAGE4[✔️ Stage: Verify<br/>Post-deploy checks]
+        
+        START --> STAGE1
+        STAGE1 -->|Success| STAGE2
+        STAGE2 -->|DACPAC ready| STAGE3
+        STAGE3 -->|Deployed| STAGE4
+    end
+
+    subgraph "7. Post-Deployment"
+        RUNID[🆔 Pipeline Run ID<br/>Returned from API]
+        UPDATE[💾 Update Database<br/>usp_MarkSchemaChangesProcessed]
+        MARK[✅ Mark as Processed<br/>Set Processed=1<br/>Set PipelineRunId]
+        
+        STAGE4 -->|Complete| RUNID
+        RUNID --> UPDATE
+        UPDATE --> MARK
+        MARK -.->|UPDATE| LOG
+    end
+
+    subgraph "8. Monitoring & Alerts"
+        INSIGHTS[📊 Application Insights<br/>Logs & Metrics]
+        ALERT[🔔 Alerts<br/>If errors > threshold]
+        DASH[📈 Dashboard<br/>Change statistics]
+        
+        POLL -.->|Log events| INSIGHTS
+        API -.->|Log trigger| INSIGHTS
+        STAGE3 -.->|Log deployment| INSIGHTS
+        INSIGHTS -->|Monitor| ALERT
+        LOG -.->|Query| DASH
+    end
+
+    subgraph "9. Error Handling"
+        FAIL1{Pipeline<br/>Failed?}
+        FAIL2{Connection<br/>Error?}
+        RETRY[🔄 Retry Logic]
+        NOTIFY[📧 Notify Team]
+        
+        STAGE3 --> FAIL1
+        POLL --> FAIL2
+        FAIL1 -->|Yes| RETRY
+        FAIL2 -->|Yes| RETRY
+        RETRY --> NOTIFY
+        RETRY -.->|Retry later| TIMER
+    end
+
+    CHECK -->|Nē| TIMER
+    
+    style DEV fill:#e1f5ff
+    style CHANGE fill:#fff3e0
+    style TRIGGER fill:#f3e5f5
+    style LOG fill:#e8f5e9
+    style TIMER fill:#fff9c4
+    style CHECK fill:#ffebee
+    style API fill:#e0f2f1
+    style STAGE3 fill:#fce4ec
+    style MARK fill:#c8e6c9
+    style INSIGHTS fill:#e3f2fd
+    style ALERT fill:#ffccbc

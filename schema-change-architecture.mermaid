@@ -1,0 +1,94 @@
+graph LR
+    subgraph AZURE["☁️ AZURE CLOUD"]
+        subgraph SQL_ENV["🗄️ SQL Environment"]
+            TESTDB[("Test Database<br/>TestDB<br/>---<br/>Tables<br/>Procedures<br/>Views<br/>Functions")]
+            DDL_TRG["DDL Trigger<br/>trg_CaptureSchemaChanges<br/>---<br/>Monitors:<br/>CREATE/ALTER/DROP"]
+            LOG_TBL[("SchemaChangeLog<br/>---<br/>ChangeId<br/>ObjectName<br/>ChangeType<br/>Processed")]
+            
+            TESTDB -.->|aktivizē| DDL_TRG
+            DDL_TRG -->|INSERT| LOG_TBL
+        end
+        
+        subgraph POLLING["⚙️ Polling Service (Choose One)"]
+            OPT_A["Option A:<br/>Azure Function<br/>---<br/>Runtime: Python 3.11<br/>Trigger: Timer<br/>Schedule: */2 * * * *"]
+            OPT_B["Option B:<br/>Azure Automation<br/>---<br/>Runtime: PowerShell<br/>Runbook: SchemaChangePoller<br/>Schedule: Every 5 min"]
+            
+            OPT_A -.->|vai| OPT_B
+        end
+        
+        subgraph DEVOPS["🔧 Azure DevOps"]
+            PIPELINE["Pipeline<br/>---<br/>1. Validate changes<br/>2. Build DACPAC<br/>3. Deploy to Test<br/>4. Verify"]
+            REPO[("Git Repository<br/>---<br/>*.sqlproj<br/>Tables/<br/>Procedures/<br/>Views/")]
+            ARTIFACTS[("Artifacts<br/>---<br/>database.dacpac")]
+            
+            REPO -->|build| PIPELINE
+            PIPELINE -->|publish| ARTIFACTS
+        end
+        
+        subgraph MONITORING["📊 Monitoring"]
+            APPINS["Application Insights<br/>---<br/>Logs<br/>Metrics<br/>Traces"]
+            ALERTS["Alerts<br/>---<br/>Error rate > 5<br/>Failed deployments<br/>Email/Teams"]
+            
+            APPINS --> ALERTS
+        end
+        
+        subgraph SECRETS["🔐 Secrets Management"]
+            KV["Key Vault<br/>---<br/>SQL Password<br/>ADO PAT<br/>Connection Strings"]
+        end
+    end
+    
+    subgraph EXTERNAL["🌐 External"]
+        USERS["👥 Users/Teams<br/>---<br/>Email<br/>Slack<br/>Microsoft Teams"]
+    end
+    
+    %% Main Flow
+    LOG_TBL <-.->|query every 2-5 min| OPT_A
+    LOG_TBL <-.->|query every 2-5 min| OPT_B
+    
+    OPT_A -->|"REST API<br/>POST /runs"| PIPELINE
+    OPT_B -->|"REST API<br/>POST /runs"| PIPELINE
+    
+    PIPELINE -->|deploy| TESTDB
+    PIPELINE -.->|update| LOG_TBL
+    
+    %% Monitoring connections
+    OPT_A -.->|telemetry| APPINS
+    OPT_B -.->|telemetry| APPINS
+    PIPELINE -.->|logs| APPINS
+    
+    ALERTS -.->|notify| USERS
+    
+    %% Secrets
+    OPT_A <-.->|get secrets| KV
+    OPT_B <-.->|get secrets| KV
+    PIPELINE <-.->|get credentials| KV
+    
+    %% Styling
+    classDef database fill:#4CAF50,stroke:#2E7D32,stroke-width:2px,color:#fff
+    classDef trigger fill:#9C27B0,stroke:#6A1B9A,stroke-width:2px,color:#fff
+    classDef polling fill:#FF9800,stroke:#E65100,stroke-width:2px,color:#fff
+    classDef pipeline fill:#2196F3,stroke:#1565C0,stroke-width:2px,color:#fff
+    classDef monitoring fill:#F44336,stroke:#C62828,stroke-width:2px,color:#fff
+    classDef secrets fill:#607D8B,stroke:#37474F,stroke-width:2px,color:#fff
+    
+    class TESTDB,LOG_TBL database
+    class DDL_TRG trigger
+    class OPT_A,OPT_B polling
+    class PIPELINE,REPO,ARTIFACTS pipeline
+    class APPINS,ALERTS monitoring
+    class KV secrets
+    
+    %% Legend
+    subgraph LEGEND["📖 Legend"]
+        L1["━━━ Galvenais flow"]
+        L2["╌╌╌ Monitoring/Logging"]
+        L3["⟷ Datu nolasīšana"]
+    end
+    
+    style AZURE fill:#E3F2FD,stroke:#1976D2,stroke-width:3px
+    style SQL_ENV fill:#F1F8E9,stroke:#558B2F,stroke-width:2px
+    style POLLING fill:#FFF3E0,stroke:#EF6C00,stroke-width:2px
+    style DEVOPS fill:#E8EAF6,stroke:#3949AB,stroke-width:2px
+    style MONITORING fill:#FCE4EC,stroke:#C2185B,stroke-width:2px
+    style SECRETS fill:#ECEFF1,stroke:#455A64,stroke-width:2px
+    style LEGEND fill:#FFFDE7,stroke:#F57F17,stroke-width:2px

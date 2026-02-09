@@ -1,0 +1,66 @@
+graph LR
+    subgraph ONE["1️⃣ SCHEMA CHANGE"]
+        A[👨‍💻 Developer<br/>ALTER TABLE...]
+    end
+    
+    subgraph TWO["2️⃣ CAPTURE"]
+        B[⚡ DDL Trigger<br/>Auto-fires]
+        C[(📋 Log Table<br/>Processed=0)]
+    end
+    
+    subgraph THREE["3️⃣ DETECT"]
+        D[⏰ Timer<br/>Every 2-5 min]
+        E[🔍 Poll<br/>Check log]
+        F{New<br/>changes?}
+    end
+    
+    subgraph FOUR["4️⃣ TRIGGER"]
+        G[📤 HTTP POST<br/>Azure DevOps API]
+        H[🚀 Pipeline<br/>Starts]
+    end
+    
+    subgraph FIVE["5️⃣ DEPLOY"]
+        I[🔨 Build<br/>DACPAC]
+        J[📦 Deploy<br/>to Test DB]
+        K[✅ Verify]
+    end
+    
+    subgraph SIX["6️⃣ COMPLETE"]
+        L[💾 Update Log<br/>Processed=1]
+        M[✓ Done]
+    end
+    
+    A --> B
+    B --> C
+    C -.-> D
+    D --> E
+    E --> F
+    F -->|Yes| G
+    F -.->|No| D
+    G --> H
+    H --> I
+    I --> J
+    J --> K
+    K --> L
+    L --> M
+    
+    style A fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    style B fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    style C fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
+    style D fill:#fff9c4,stroke:#f57c00,stroke-width:2px
+    style E fill:#fff9c4,stroke:#f57c00,stroke-width:2px
+    style F fill:#ffebee,stroke:#c62828,stroke-width:2px
+    style G fill:#e0f2f1,stroke:#00796b,stroke-width:2px
+    style H fill:#e0f2f1,stroke:#00796b,stroke-width:2px
+    style I fill:#e8eaf6,stroke:#3949ab,stroke-width:2px
+    style J fill:#e8eaf6,stroke:#3949ab,stroke-width:2px
+    style K fill:#e8eaf6,stroke:#3949ab,stroke-width:2px
+    style L fill:#c8e6c9,stroke:#2e7d32,stroke-width:2px
+    style M fill:#c8e6c9,stroke:#2e7d32,stroke-width:3px
+    
+    style ONE fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    style TWO fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px
+    style THREE fill:#fff9c4,stroke:#f57f17,stroke-width:2px
+    style FOUR fill:#e0f2f1,stroke:#00695c,stroke-width:2px
+    style FIVE fill:#e8eaf6,stroke:#3949ab,stroke-width:2px
+    style SIX fill:#c8e6c9,stroke:#2e7d32,stroke-width:2px
